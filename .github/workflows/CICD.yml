@@ -170,7 +170,7 @@ jobs:
       - name: Check deploy server URL with dynamic target
         uses: jtalk/url-health-check-action@v3
         with:
-          # 현재 EC2 아이피 + hc[건강체크] + 방금 연 서버이름 [green or blue] + env 를 체크
+          # 현재 EC2 아이피 + healthcheck[건강체크] + 방금 연 서버이름 [green or blue]  체크
           # 포트는 nginx 에서 라우팅할거임
           url: http://${{ secrets.SPRING_BOOT_DOCKER_IP }}/healthcheck/${{ env.TARGET_UPSTREAM }}
           # 최대 3번
