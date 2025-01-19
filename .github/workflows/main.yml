@@ -1,0 +1,253 @@
+# 깃헙 Action Trigger CICD
+name: CI
+# 이름이 "main" 인 브랜치가 "push" or "pull_request" 가 요청되었을때 실행하겠다.
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# 읽기 권한을 부여하겠다.
+permissions:
+  contents: read
+
+# Job 리스트
+jobs:
+  # 1반쩨 job = 빌드
+  build:
+    runs-on: ubuntu-latest # 우분투 최신버전을 사용하겠다
+    steps:
+      - uses: actions/checkout@v3 # 지금 트리거된 브랜치를 현재 브랜치로 checkout 하겠다
+
+      # OpenJDK 17 설치 (Temurin 사용)
+      - name: Install OpenJDK 17 #  # 커맨드 이름
+        uses: actions/setup-java@v3 # 깃헙 action 에 있는 setup-java@v3 라는 모듈을 사용하겠다.
+        with:
+          java-version: '17' # java 17 을 사용하겠다.
+          distribution: 'temurin' # JDK 17을 설치할 때 Eclipse Temurin 배포판을 다운 받겠다.
+
+      # 설치한 JDK 설정
+      - name: Set Java 17 # 커맨드 이름
+        uses: actions/setup-java@v3  # 깃헙 action 에 있는 setup-java@v3 라는 모듈을 사용하겠다.
+        with:
+          java-version: '17' # java 버전
+          distribution: 'temurin' # Java17 를 Eclipse Temurin 배포판으로 설정 하겠다.
+
+     # 그래들을 사용하여 현재 git 에 있는걸 빌드하는 커맨드
+      - name: Build with Gradle # 커맨드 이름
+        # Run 시작
+        # secrets 위치 = 레파지토리 -> Settings -> 왼쪽 Secrets and variables -> action
+        # 서버 주소, api key, sql id, pw 등등 공개되면 안되는 값들 저장용
+#        echo ${{secrets.APPLICATION_SECRET}} | base64 --decode > ./src/main/resources/application-secret.yml [현재 깃허브 비밀변수에 있는 APPLICATION_SECRET 를 base64로 디코딩하여 현재 ./src/main/resources/application-secret.yml 에 저장하겠다 단 이게 진짜로 저장되지는 않음 임시적으로]
+#        cat ./src/main/resources/application-secret.yml [cat 을 사용하여 터미널 로그에 찍히도록 설정]
+#        chmod +x ./gradlew [현재 ./gradlew 에 실행권한을 부여 [chmod == 파일모드변경] [+x == 실행을 의미] ]
+#        ./gradlew clean build -x test [./gradlew 을 사용하여 "클린" -> "빌드" 를 실행하고 test 코드드 클린 및 빌드는 제외하겠다 [-x 제외를 의미함]]
+        run: |
+          echo ${{secrets.APPLICATION_SECRET}} | base64 --decode > ./src/main/resources/application-secret.yml
+          cat ./src/main/resources/application-secret.yml
+          chmod +x ./gradlew
+          ./gradlew clean build -x test
+
+      # Docker Hub 에 로그인하기
+      - name: Login to DockerHub
+        uses: docker/login-action@v1 # 깃헙 액션에서 제공해주는 도커로그인 기능을 사용하겠다.
+        with:
+          # 도커 허브에서 사용하는 아이디와 발급받은 비밀 토큰
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 도커 빌드 하기
+      - name: Build Docker
+        # 이 run 중 마지막 . 은 현재 디렉토리 == 이 git 프로젝트 해당 브랜치에 최상단으로 이동한후 -> 프로젝트에있는 Dockerfile 을 찾고 읽음
+        # 그리고 이 Dockerfile 안에는 .jar 파일을 복사하도록 설계되어있음
+        # 또한 이 Dockerfile 안에는 현재 지정된 컨테이너가 실행됬을때 .jar 파일이 실행되도록 되어있음
+        # ENTRYPOINT ["java", "-Dspring.profiles.active=${PROFILES}", "-Dserver.env=${ENV}", "-jar", "/app/app.jar"]
+        # 컨테이너가 실행되면 위 jar 를 실행시키라는 명령임
+        run: docker build --platform linux/amd64 -t ${{ secrets.DOCKERHUB_USERNAME }}/spring_boot_docker .
+      # 도커 Push 하기
+      - name: Push Docker
+        # 위에서 카피한 .jar 파일과 설정들을 Docker Hub 로 Push
+        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/spring_boot_docker:latest
+
+  # 2번째 Job = 배포하기
+  deploy:
+    # build 가 끝난후에 실행되게 해라
+    needs: build
+    # 우분투의 마지막 최신버전을 사용하겠다
+    runs-on: ubuntu-latest
+    steps:
+      # 타겟 IP 설정하기 [현재 열려있는 서버가 블루인지 그린인지 판단하고 열려있는건 닫고 닫혀있는건 열기위한 커맨드]
+      - name: Set target IP # 커맨드 이름
+        # STATUS 에 http://${{ secrets.SPRING_BOOT_DOCKER_IP }}/env 를 호출해서 반환받는 값을 저장 [200 or 400번대]
+#        STATUS=$(curl -o /dev/null -w "%{http_code}" "http://${{ secrets.SPRING_BOOT_DOCKER_IP }}/env")
+        # STATUS 로그로 찍기
+#        echo $STATUS
+        # 만약 STATUS 가 200 이라면
+#        if [ $STATUS = 200 ]; then
+            # 현재 열려있는 서버는 blue 임
+#           CURRENT_UPSTREAM=$(curl -s "http://${{ secrets.SPRING_BOOT_DOCKER_IP }}/env")
+#        else
+            # 그게아니라면 green 임
+#           CURRENT_UPSTREAM=green
+#        fi = 조거문을 종료하겠다
+            # 현재 열려있는 서버를 $GITHUB_ENV 깃헙 환경변수에 저장하겠다. 사용방법은 env.CURRENT_UPSTREAM 요론식
+#           echo CURRENT_UPSTREAM=$CURRENT_UPSTREAM >> $GITHUB_ENV
+        # 만약 현재 열려있는 서버가 블루 라면
+#        if [ $CURRENT_UPSTREAM = blue ]; then
+            # 현재 포트는 8080
+#           echo "CURRENT_PORT=8080" >> $GITHUB_ENV
+            # 닫혀있는 [= 곧 열려야할] 포트는 8081
+#           echo "STOPPED_PORT=8081" >> $GITHUB_ENV
+
+            # 이제 열려야할 서버는 green 이다
+#           echo "TARGET_UPSTREAM=green" >> $GITHUB_ENV
+
+         #만약 현재 열려있는게 green 이라면
+#        elif [ $CURRENT_UPSTREAM = green ]; then
+        # 현재 포트는 8081
+#           echo "CURRENT_PORT=8081" >> $GITHUB_ENV
+        # 닫혀있는 [= 곧 열려야할] 포트는 8080
+#           echo "STOPPED_PORT=8080" >> $GITHUB_ENV
+
+        # 이제 열려야할 서버는 blue 이다
+#           echo "TARGET_UPSTREAM=blue" >> $GITHUB_ENV
+#        else
+        # 그게 아니라면 에러
+#           echo "error"
+#           exit 1
+        # 조건문 종료
+#        fi
+        run: |
+          STATUS=$(curl -o /dev/null -w "%{http_code}" "http://${{ secrets.SPRING_BOOT_DOCKER_IP }}/env")
+          echo $STATUS
+          if [ $STATUS = 200 ]; then
+            CURRENT_UPSTREAM=$(curl -s "http://${{ secrets.SPRING_BOOT_DOCKER_IP }}/env")
+          else
+            CURRENT_UPSTREAM=green
+          fi
+          echo CURRENT_UPSTREAM=$CURRENT_UPSTREAM >> $GITHUB_ENV
+          if [ $CURRENT_UPSTREAM = blue ]; then
+            echo "CURRENT_PORT=8080" >> $GITHUB_ENV
+            echo "STOPPED_PORT=8081" >> $GITHUB_ENV
+            echo "TARGET_UPSTREAM=green" >> $GITHUB_ENV
+          elif [ $CURRENT_UPSTREAM = green ]; then
+            echo "CURRENT_PORT=8081" >> $GITHUB_ENV
+            echo "STOPPED_PORT=8080" >> $GITHUB_ENV
+            echo "TARGET_UPSTREAM=blue" >> $GITHUB_ENV
+          else
+            echo "error"
+            exit 1
+          fi
+
+    # Docker 컴포즈 하기
+      - name: Docker compose
+        uses: appleboy/ssh-action@master # 깃헙액션에 제공해주는 appleboy 에있는 ssh-action@master 라는 모듈을 사용하겠다.
+        with:
+          # 우분투를 사용하겠다
+          username: ubuntu
+          # 액션 시크릿에 저장되어있는 EC2 퍼블릭 탄력적 IP 를 사용하겠다.
+          host: ${{ secrets.SPRING_BOOT_DOCKER_IP }}
+          # 액션 시크릿에 저장되어있는 EC2 시크릿키를 사용하겠다.
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # 아래 script 가 끝나면 SSH 연결을 종료하겠다.
+          script_stop: true
+          # 관리자 권한으로 아까 위에올린 Docker Hub 로 Push 한 파일을 Pull 하겠다.
+#          sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/spring_boot_docker:latest
+          # 관리자 권한으로 현재 EC2에 저장되어있는 docker-compose-{blue or green}.yml 을 실행하겠다.
+#          sudo docker-compose -f docker-compose-${{env.TARGET_UPSTREAM}}.yml up -d
+          script: |
+            sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/spring_boot_docker:latest
+            sudo docker-compose -f docker-compose-${{env.TARGET_UPSTREAM}}.yml up -d
+
+      # 현재 서버 상태 확인
+#      - name: Check deploy server URL
+#        uses: jtalk/url-health-check-action@v3
+#        with:
+#          url: http://${{ secrets.SPRING_BOOT_DOCKER_IP }}:${{env.STOPPED_PORT}}/env
+#          max-attempts: 3
+#          retry-delay: 10s
+
+      - name: Check deploy server URL with dynamic target
+        uses: jtalk/url-health-check-action@v3
+        with:
+          # 현재 EC2 아이피 + hc[건강체크] + 방금 연 서버이름 [green or blue] + env 를 체크
+          # 포트는 nginx 에서 라우팅할거임
+          url: http://${{ secrets.SPRING_BOOT_DOCKER_IP }}/healthcheck/${{ env.TARGET_UPSTREAM }}
+          # 최대 3번
+          max-attempts: 3
+          # 10초 간격으로
+          retry-delay: 10s
+
+#      - name: Check deploy server URL with retries
+#        uses: appleboy/ssh-action@master
+#        with:
+#          username: ubuntu
+#          host: ${{ secrets.SPRING_BOOT_DOCKER_IP }}
+#          key: ${{ secrets.EC2_SSH_KEY }}
+#          script: |
+#            URL="http://localhost:${{env.STOPPED_PORT}}/env"
+#            MAX_ATTEMPTS=3
+#            RETRY_DELAY=10
+#            ATTEMPT=1
+#            STATUS=0
+#
+#            while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+#            STATUS=$(curl -o /dev/null -w "%{http_code}" "$URL")
+#            echo "Attempt $ATTEMPT: HTTP Status Code: $STATUS"
+#
+#            if [ "$STATUS" -eq 200 ]; then
+#            echo "Server is up!"
+#            exit 0
+#            fi
+#
+#            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+#            echo "Server is down! Retrying in $RETRY_DELAY seconds..."
+#            sleep $RETRY_DELAY
+#            fi
+#
+#            ATTEMPT=$((ATTEMPT+1))
+#            done
+#
+#            echo "Server is still down after $MAX_ATTEMPTS attempts!"
+#            exit 1
+      # nginx 에있는 파일내에 있는 url 변경하기
+      ## 파일 경로 = [etc/nginx/conf.d/service-env.inc]
+      - name: Change nginx upstream
+        uses: appleboy/ssh-action@master  # 깃헙액션에 제공해주는 appleboy 에있는 ssh-action@master 라는 모듈을 사용하겠다.
+        with:
+          # 우분투를 사용하겠다
+          username: ubuntu
+          # 액션 시크릿에 저장되어있는 EC2 퍼블릭 탄력적 IP 를 사용하겠다.
+          host: ${{ secrets.SPRING_BOOT_DOCKER_IP }}
+          # 액션 시크릿에 저장되어있는 EC2 시크릿키를 사용하겠다.
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # 아래 script 가 끝나면 SSH 연결을 종료하겠다.
+          script_stop: true
+          # 관리자 권한으로 docker 에 올라와있는 nginx 를 bash 로 열고
+          # 'echo "set \$service_url ${{ env.TARGET_UPSTREAM }};" 이걸
+          #  /etc/nginx/conf.d/service-env.inc 이곳에 덮어쓰겠다.
+          # 그리고 nginx reload 를 하겠다.
+          # -c = 뒤에오는 문자열을 명령으로 실행하겠다 [아마 command 의 약자같음]
+#          sudo docker exec -i nginxserver bash -c 'echo "set \$service_url ${{ env.TARGET_UPSTREAM }};" > /etc/nginx/conf.d/service-env.inc && nginx -s reload'
+          script: |
+            sudo docker exec -i nginxserver bash -c 'echo "set \$service_url ${{ env.TARGET_UPSTREAM }};" > /etc/nginx/conf.d/service-env.inc && nginx -s reload' 
+
+      # 현재 열려있는 서버 닫기 [이전 OLD 버전의 서버를 닫는것임]
+      - name: Stop current server
+        uses: appleboy/ssh-action@master
+        with:
+          # 우분투를 사용하겠다
+          username: ubuntu
+          # 액션 시크릿에 저장되어있는 EC2 퍼블릭 탄력적 IP 를 사용하겠다.
+          host: ${{ secrets.SPRING_BOOT_DOCKER_IP }}
+          # 액션 시크릿에 저장되어있는 EC2 시크릿키를 사용하겠다.
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # 아래 script 가 끝나면 SSH 연결을 종료하겠다.
+          script_stop: true
+          # 현재 Docker 에 올라와있는 내려가야할 서버를 stop
+#          sudo docker stop ${{env.CURRENT_UPSTREAM}}
+          # 그리고 삭제
+#          sudo docker rm ${{env.CURRENT_UPSTREAM}}
+          script: |
+            sudo docker stop ${{env.CURRENT_UPSTREAM}}
+            sudo docker rm ${{env.CURRENT_UPSTREAM}}
