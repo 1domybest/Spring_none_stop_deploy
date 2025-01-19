@@ -63,11 +63,11 @@ jobs:
         # 또한 이 Dockerfile 안에는 현재 지정된 컨테이너가 실행됬을때 .jar 파일이 실행되도록 되어있음
         # ENTRYPOINT ["java", "-Dspring.profiles.active=${PROFILES}", "-Dserver.env=${ENV}", "-jar", "/app/app.jar"]
         # 컨테이너가 실행되면 위 jar 를 실행시키라는 명령임
-        run: docker build --platform linux/amd64 -t ${{ secrets.DOCKERHUB_USERNAME }}/spring_boot_docker .
+        run: docker build --platform linux/amd64 -t ${{ secrets.DOCKERHUB_USERNAME }}/spring_none_stop_deploy_docker .
       # 도커 Push 하기
       - name: Push Docker
         # 위에서 카피한 .jar 파일과 설정들을 Docker Hub 로 Push
-        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/spring_boot_docker:latest
+        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/spring_none_stop_deploy_docker:latest
 
   # 2번째 Job = 배포하기
   deploy:
@@ -156,7 +156,7 @@ jobs:
           # 관리자 권한으로 현재 EC2에 저장되어있는 docker-compose-{blue or green}.yml 을 실행하겠다.
 #          sudo docker-compose -f docker-compose-${{env.TARGET_UPSTREAM}}.yml up -d
           script: |
-            sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/spring_boot_docker:latest
+            sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/spring_none_stop_deploy_docker:latest
             sudo docker-compose -f docker-compose-${{env.TARGET_UPSTREAM}}.yml up -d
 
       # 현재 서버 상태 확인
