@@ -1,4 +1,4 @@
-package com.example.Spring_JWT.docker;
+package com.example.spring_noneStop_deploy.docker;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
